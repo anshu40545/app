@@ -3,7 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { 
   Star, ShoppingCart, CheckCircle, Download, Shield, 
-  ArrowLeft, Share2, Heart, Eye
+  ArrowLeft, Share2, Heart, Eye, Copy, Facebook, Twitter, Linkedin,
+  ChevronLeft, ChevronRight, Zap, Clock, RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,8 +18,11 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const ProductDetailPage = () => {
   const { id } = useParams();
   const [product, setProduct] = useState(null);
+  const [relatedProducts, setRelatedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
   const { addToCart, isInCart } = useCart();
 
   useEffect(() => {
@@ -26,6 +30,10 @@ const ProductDetailPage = () => {
       try {
         const response = await axios.get(`${API}/products/${id}`);
         setProduct(response.data);
+        
+        // Fetch related products
+        const relatedResponse = await axios.get(`${API}/products?category=${response.data.category}&limit=4`);
+        setRelatedProducts(relatedResponse.data.filter(p => p.id !== id).slice(0, 3));
       } catch (error) {
         console.error('Error fetching product:', error);
       } finally {
@@ -33,6 +41,7 @@ const ProductDetailPage = () => {
       }
     };
     fetchProduct();
+    setSelectedImage(0);
   }, [id]);
 
   const handleAddToCart = () => {
@@ -41,6 +50,41 @@ const ProductDetailPage = () => {
     } else {
       addToCart(product);
       toast.success('Added to cart!');
+    }
+  };
+
+  const handleWishlist = () => {
+    setIsWishlisted(!isWishlisted);
+    toast.success(isWishlisted ? 'Removed from wishlist' : 'Added to wishlist');
+  };
+
+  const handleShare = (platform) => {
+    const url = window.location.href;
+    const text = `Check out ${product.name} on Devmora!`;
+    
+    const shareUrls = {
+      copy: () => {
+        navigator.clipboard.writeText(url);
+        toast.success('Link copied to clipboard!');
+      },
+      facebook: () => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, '_blank'),
+      twitter: () => window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`, '_blank'),
+      linkedin: () => window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`, '_blank'),
+    };
+    
+    shareUrls[platform]?.();
+    setShowShareMenu(false);
+  };
+
+  const nextImage = () => {
+    if (allImages.length > 1) {
+      setSelectedImage((prev) => (prev + 1) % allImages.length);
+    }
+  };
+
+  const prevImage = () => {
+    if (allImages.length > 1) {
+      setSelectedImage((prev) => (prev - 1 + allImages.length) % allImages.length);
     }
   };
 
@@ -90,18 +134,37 @@ const ProductDetailPage = () => {
           <span className="text-slate-300">/</span>
           <span className="text-slate-500 capitalize">{product.category.replace('_', ' ')}</span>
           <span className="text-slate-300">/</span>
-          <span className="text-navy">{product.name}</span>
+          <span className="text-navy font-medium">{product.name}</span>
         </nav>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
           {/* Images */}
           <div data-testid="product-images">
-            <div className="aspect-video rounded-2xl overflow-hidden bg-slate-100 mb-4">
+            <div className="aspect-video rounded-2xl overflow-hidden bg-slate-100 mb-4 relative group">
               <img
                 src={allImages[selectedImage]}
                 alt={product.name}
                 className="w-full h-full object-cover"
               />
+              {allImages.length > 1 && (
+                <>
+                  <button 
+                    onClick={prevImage}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center hover:bg-white transition-colors shadow-lg opacity-0 group-hover:opacity-100"
+                  >
+                    <ChevronLeft className="w-5 h-5 text-navy" />
+                  </button>
+                  <button 
+                    onClick={nextImage}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center hover:bg-white transition-colors shadow-lg opacity-0 group-hover:opacity-100"
+                  >
+                    <ChevronRight className="w-5 h-5 text-navy" />
+                  </button>
+                </>
+              )}
+              <Badge className="absolute top-4 right-4 bg-white/90 text-navy">
+                {selectedImage + 1} / {allImages.length}
+              </Badge>
             </div>
             {allImages.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2">
@@ -109,8 +172,8 @@ const ProductDetailPage = () => {
                   <button
                     key={index}
                     onClick={() => setSelectedImage(index)}
-                    className={`w-20 h-14 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${
-                      selectedImage === index ? 'border-gold' : 'border-transparent'
+                    className={`w-24 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-all ${
+                      selectedImage === index ? 'border-gold shadow-lg' : 'border-transparent hover:border-slate-200'
                     }`}
                   >
                     <img src={img} alt="" className="w-full h-full object-cover" />
@@ -137,28 +200,29 @@ const ProductDetailPage = () => {
                       className={`w-5 h-5 ${i < Math.floor(product.rating) ? 'text-gold fill-gold' : 'text-slate-200'}`}
                     />
                   ))}
-                  <span className="ml-2 text-slate-600">{product.rating}</span>
+                  <span className="ml-2 text-slate-600 font-medium">{product.rating}</span>
                 </div>
                 <span className="text-slate-400">|</span>
                 <span className="text-slate-600 flex items-center gap-1">
                   <Download className="w-4 h-4" /> {product.downloads} downloads
                 </span>
               </div>
-              <p className="text-slate-600 leading-relaxed" data-testid="product-description">
+              <p className="text-slate-600 leading-relaxed text-lg" data-testid="product-description">
                 {product.description}
               </p>
             </div>
 
             {/* Price & Actions */}
-            <div className="bg-slate-50 rounded-2xl p-6 mb-6">
+            <div className="bg-gradient-to-br from-slate-50 to-white rounded-2xl p-6 mb-6 border border-slate-100">
               <div className="flex items-end justify-between mb-6">
                 <div>
                   <span className="text-sm text-slate-500">Price</span>
                   <div className="text-4xl font-bold text-navy" data-testid="product-price">
                     ₹{product.price.toLocaleString()}
                   </div>
+                  <span className="text-sm text-green-600 font-medium">✓ Instant delivery</span>
                 </div>
-                <Badge variant="outline" className="border-green-500 text-green-700">
+                <Badge variant="outline" className="border-green-500 text-green-700 bg-green-50">
                   {product.license_type} License
                 </Badge>
               </div>
@@ -167,25 +231,69 @@ const ProductDetailPage = () => {
                 <Button
                   size="lg"
                   onClick={handleAddToCart}
-                  className={`flex-grow rounded-full ${isInCart(product.id) ? 'bg-green-600 hover:bg-green-700' : 'bg-navy hover:bg-navy-800'}`}
+                  className={`flex-grow rounded-full text-lg py-6 ${isInCart(product.id) ? 'bg-green-600 hover:bg-green-700' : 'bg-navy hover:bg-navy-800'}`}
                   data-testid="add-to-cart-btn"
                 >
                   <ShoppingCart className="w-5 h-5 mr-2" />
                   {isInCart(product.id) ? 'In Cart' : 'Add to Cart'}
                 </Button>
-                <Button size="lg" variant="outline" className="rounded-full px-4">
-                  <Heart className="w-5 h-5" />
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  className={`rounded-full px-4 ${isWishlisted ? 'border-red-500 text-red-500' : ''}`}
+                  onClick={handleWishlist}
+                >
+                  <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-red-500' : ''}`} />
                 </Button>
-                <Button size="lg" variant="outline" className="rounded-full px-4">
-                  <Share2 className="w-5 h-5" />
-                </Button>
+                <div className="relative">
+                  <Button 
+                    size="lg" 
+                    variant="outline" 
+                    className="rounded-full px-4"
+                    onClick={() => setShowShareMenu(!showShareMenu)}
+                  >
+                    <Share2 className="w-5 h-5" />
+                  </Button>
+                  {showShareMenu && (
+                    <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-50 w-48">
+                      <button onClick={() => handleShare('copy')} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 rounded-lg text-left">
+                        <Copy className="w-4 h-4" /> Copy Link
+                      </button>
+                      <button onClick={() => handleShare('facebook')} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 rounded-lg text-left">
+                        <Facebook className="w-4 h-4" /> Facebook
+                      </button>
+                      <button onClick={() => handleShare('twitter')} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 rounded-lg text-left">
+                        <Twitter className="w-4 h-4" /> Twitter
+                      </button>
+                      <button onClick={() => handleShare('linkedin')} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 rounded-lg text-left">
+                        <Linkedin className="w-4 h-4" /> LinkedIn
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <Link to="/cart" className="block">
-                <Button size="lg" variant="outline" className="w-full rounded-full border-gold text-navy hover:bg-gold/10">
+                <Button size="lg" variant="outline" className="w-full rounded-full border-gold text-navy hover:bg-gold/10 py-6">
                   <Eye className="w-5 h-5 mr-2" /> View Cart & Checkout
                 </Button>
               </Link>
+            </div>
+
+            {/* Quick Benefits */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="text-center p-4 bg-slate-50 rounded-xl">
+                <Zap className="w-6 h-6 text-gold mx-auto mb-2" />
+                <span className="text-xs text-slate-600">Instant Download</span>
+              </div>
+              <div className="text-center p-4 bg-slate-50 rounded-xl">
+                <RefreshCw className="w-6 h-6 text-gold mx-auto mb-2" />
+                <span className="text-xs text-slate-600">Free Updates</span>
+              </div>
+              <div className="text-center p-4 bg-slate-50 rounded-xl">
+                <Clock className="w-6 h-6 text-gold mx-auto mb-2" />
+                <span className="text-xs text-slate-600">24h Support</span>
+              </div>
             </div>
 
             {/* Trust Badges */}
@@ -290,6 +398,50 @@ const ProductDetailPage = () => {
             </TabsContent>
           </Tabs>
         </div>
+
+        {/* Related Products */}
+        {relatedProducts.length > 0 && (
+          <section className="mt-16 pt-16 border-t border-slate-200" data-testid="related-products">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="font-heading text-2xl font-semibold text-navy">Related Products</h2>
+              <Link to={`/marketplace/${product.category}`} className="text-gold font-medium hover:underline">
+                View All →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {relatedProducts.map((relatedProduct) => (
+                <Link
+                  key={relatedProduct.id}
+                  to={`/product/${relatedProduct.id}`}
+                  className="group bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg transition-all duration-300"
+                >
+                  <div className="aspect-video relative overflow-hidden">
+                    <img
+                      src={relatedProduct.image}
+                      alt={relatedProduct.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                    <Badge className="absolute top-3 left-3 bg-white/90 text-navy capitalize">
+                      {relatedProduct.category.replace('_', ' ')}
+                    </Badge>
+                  </div>
+                  <div className="p-5">
+                    <h3 className="font-heading font-semibold text-navy mb-2 group-hover:text-gold transition-colors">
+                      {relatedProduct.name}
+                    </h3>
+                    <p className="text-sm text-slate-500 line-clamp-2 mb-3">{relatedProduct.description}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xl font-bold text-navy">₹{relatedProduct.price.toLocaleString()}</span>
+                      <div className="flex items-center gap-1 text-sm text-slate-500">
+                        <Star className="w-4 h-4 text-gold fill-gold" /> {relatedProduct.rating}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </Layout>
   );

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { 
   ArrowRight, Code, Globe, Smartphone, Palette, Package, Award,
-  CheckCircle, Star, Users, Briefcase, Shield, Clock
+  CheckCircle, Star, Users, Briefcase, Shield, Clock, Play, ChevronLeft, ChevronRight,
+  Sparkles, Zap, TrendingUp
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,11 +12,53 @@ import Layout from '@/components/layout/Layout';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+// Animated counter component
+const AnimatedCounter = ({ end, duration = 2000, suffix = '' }) => {
+  const [count, setCount] = useState(0);
+  const countRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isVisible) {
+          setIsVisible(true);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (countRef.current) {
+      observer.observe(countRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [isVisible]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    
+    let startTime;
+    const step = (timestamp) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      setCount(Math.floor(progress * end));
+      if (progress < 1) {
+        requestAnimationFrame(step);
+      }
+    };
+    requestAnimationFrame(step);
+  }, [isVisible, end, duration]);
+
+  return <span ref={countRef}>{count}{suffix}</span>;
+};
+
 const HomePage = () => {
   const [stats, setStats] = useState({ years_in_business: 2, completed_projects: 10, happy_clients: 8, products_sold: 25 });
   const [testimonials, setTestimonials] = useState([]);
   const [portfolio, setPortfolio] = useState([]);
   const [products, setProducts] = useState([]);
+  const [currentTestimonial, setCurrentTestimonial] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -37,37 +80,63 @@ const HomePage = () => {
     fetchData();
   }, []);
 
+  // Auto-rotate testimonials
+  useEffect(() => {
+    if (testimonials.length > 1) {
+      const interval = setInterval(() => {
+        setCurrentTestimonial((prev) => (prev + 1) % testimonials.length);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [testimonials.length]);
+
   const services = [
-    { icon: Code, title: 'Custom Software', description: 'Tailored solutions built to transform your business operations', link: '/services' },
-    { icon: Globe, title: 'Website Development', description: 'High-performance websites that convert visitors into customers', link: '/services' },
-    { icon: Palette, title: 'UI/UX Design', description: 'User-centric designs that delight and engage', link: '/services' },
-    { icon: Smartphone, title: 'Android Apps', description: 'Native Android applications with seamless experiences', link: '/services' },
-    { icon: Package, title: 'Design Templates', description: 'Premium templates for instant professional presence', link: '/marketplace/template' },
-    { icon: Award, title: 'Logo & Branding', description: 'Memorable brand identities that stand out', link: '/marketplace/logo' },
+    { icon: Code, title: 'Custom Software', description: 'Tailored solutions built to transform your business operations', link: '/services', color: 'from-blue-500 to-indigo-600' },
+    { icon: Globe, title: 'Website Development', description: 'High-performance websites that convert visitors into customers', link: '/services', color: 'from-emerald-500 to-teal-600' },
+    { icon: Palette, title: 'UI/UX Design', description: 'User-centric designs that delight and engage', link: '/services', color: 'from-pink-500 to-rose-600' },
+    { icon: Smartphone, title: 'Android Apps', description: 'Native Android applications with seamless experiences', link: '/services', color: 'from-green-500 to-emerald-600' },
+    { icon: Package, title: 'Design Templates', description: 'Premium templates for instant professional presence', link: '/marketplace/template', color: 'from-orange-500 to-amber-600' },
+    { icon: Award, title: 'Logo & Branding', description: 'Memorable brand identities that stand out', link: '/marketplace/logo', color: 'from-purple-500 to-violet-600' },
+  ];
+
+  const techLogos = [
+    { name: 'React', icon: '⚛️' },
+    { name: 'Node.js', icon: '🟢' },
+    { name: 'Python', icon: '🐍' },
+    { name: 'MongoDB', icon: '🍃' },
+    { name: 'AWS', icon: '☁️' },
+    { name: 'Flutter', icon: '💙' },
   ];
 
   return (
     <Layout>
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-slate-50 to-white" data-testid="hero-section">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1603615659147-ff90178359b7?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-5" />
+      <section className="relative overflow-hidden bg-gradient-to-b from-slate-50 to-white min-h-[90vh] flex items-center" data-testid="hero-section">
+        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1603615659147-ff90178359b7?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-[0.03]" />
+        
+        {/* Animated background elements */}
+        <div className="absolute top-20 left-10 w-72 h-72 bg-gold/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-navy/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-32">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
             <div className="lg:col-span-7">
               {/* Trust Badges */}
-              <div className="flex flex-wrap gap-3 mb-8">
-                <Badge variant="outline" className="border-green-500 text-green-700 bg-green-50">
+              <div className="flex flex-wrap gap-3 mb-8 animate-fade-in">
+                <Badge variant="outline" className="border-green-500 text-green-700 bg-green-50 py-1.5">
                   <Shield className="w-3 h-3 mr-1" /> SSL Secured
                 </Badge>
-                <Badge variant="outline" className="border-gold text-navy bg-gold/10">
+                <Badge variant="outline" className="border-gold text-navy bg-gold/10 py-1.5">
                   <Award className="w-3 h-3 mr-1" /> Certified Partner
+                </Badge>
+                <Badge variant="outline" className="border-blue-500 text-blue-700 bg-blue-50 py-1.5">
+                  <Sparkles className="w-3 h-3 mr-1" /> Top Rated
                 </Badge>
               </div>
 
               <h1 className="font-heading text-5xl md:text-6xl lg:text-7xl font-bold text-navy leading-tight mb-6" data-testid="hero-title">
                 Build Digital
-                <span className="block text-gradient-gold">Excellence</span>
+                <span className="block bg-gradient-to-r from-gold via-amber-500 to-gold bg-clip-text text-transparent">Excellence</span>
               </h1>
               
               <p className="text-lg md:text-xl text-slate-600 leading-relaxed mb-8 max-w-xl" data-testid="hero-description">
@@ -77,8 +146,8 @@ const HomePage = () => {
 
               <div className="flex flex-wrap gap-4 mb-12">
                 <Link to="/services" data-testid="cta-get-quote">
-                  <Button size="lg" className="bg-navy hover:bg-navy-800 text-white rounded-full px-8 py-6 text-lg shadow-lg hover:shadow-xl transition-all">
-                    Get a Quote <ArrowRight className="ml-2 w-5 h-5" />
+                  <Button size="lg" className="bg-navy hover:bg-navy-800 text-white rounded-full px-8 py-6 text-lg shadow-lg hover:shadow-xl transition-all group">
+                    Get a Quote <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
                   </Button>
                 </Link>
                 <Link to="/marketplace" data-testid="cta-browse-templates">
@@ -88,18 +157,24 @@ const HomePage = () => {
                 </Link>
               </div>
 
-              {/* Stats */}
+              {/* Stats with animated counters */}
               <div className="grid grid-cols-3 gap-6">
-                <div data-testid="stat-years">
-                  <div className="text-3xl md:text-4xl font-heading font-bold text-navy">{stats.years_in_business}+</div>
+                <div data-testid="stat-years" className="text-center md:text-left">
+                  <div className="text-3xl md:text-4xl font-heading font-bold text-navy">
+                    <AnimatedCounter end={stats.years_in_business} suffix="+" />
+                  </div>
                   <div className="text-sm text-slate-500">Years Experience</div>
                 </div>
-                <div data-testid="stat-projects">
-                  <div className="text-3xl md:text-4xl font-heading font-bold text-navy">{stats.completed_projects}+</div>
+                <div data-testid="stat-projects" className="text-center md:text-left">
+                  <div className="text-3xl md:text-4xl font-heading font-bold text-navy">
+                    <AnimatedCounter end={stats.completed_projects} suffix="+" />
+                  </div>
                   <div className="text-sm text-slate-500">Projects Delivered</div>
                 </div>
-                <div data-testid="stat-clients">
-                  <div className="text-3xl md:text-4xl font-heading font-bold text-navy">{stats.happy_clients}+</div>
+                <div data-testid="stat-clients" className="text-center md:text-left">
+                  <div className="text-3xl md:text-4xl font-heading font-bold text-navy">
+                    <AnimatedCounter end={stats.happy_clients} suffix="+" />
+                  </div>
                   <div className="text-sm text-slate-500">Happy Clients</div>
                 </div>
               </div>
@@ -108,35 +183,77 @@ const HomePage = () => {
             {/* Hero Image Grid */}
             <div className="lg:col-span-5 hidden lg:block">
               <div className="relative">
-                <div className="absolute -inset-4 bg-gradient-to-r from-gold/20 to-navy/20 rounded-3xl blur-3xl" />
+                <div className="absolute -inset-4 bg-gradient-to-r from-gold/20 to-navy/20 rounded-3xl blur-3xl animate-pulse" />
                 <div className="relative grid grid-cols-2 gap-4">
                   <div className="space-y-4">
-                    <img 
-                      src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=400"
-                      alt="Dashboard"
-                      className="rounded-2xl shadow-2xl"
-                    />
-                    <img 
-                      src="https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&q=80&w=400"
-                      alt="Branding"
-                      className="rounded-2xl shadow-2xl"
-                    />
+                    <div className="relative group">
+                      <img 
+                        src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=400"
+                        alt="Dashboard"
+                        className="rounded-2xl shadow-2xl transform group-hover:scale-105 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-navy/50 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                        <span className="text-white text-sm font-medium">Analytics Dashboard</span>
+                      </div>
+                    </div>
+                    <div className="relative group">
+                      <img 
+                        src="https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&q=80&w=400"
+                        alt="Branding"
+                        className="rounded-2xl shadow-2xl transform group-hover:scale-105 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-navy/50 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                        <span className="text-white text-sm font-medium">Brand Design</span>
+                      </div>
+                    </div>
                   </div>
                   <div className="space-y-4 pt-8">
-                    <img 
-                      src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=400"
-                      alt="Analytics"
-                      className="rounded-2xl shadow-2xl"
-                    />
-                    <img 
-                      src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&q=80&w=400"
-                      alt="Mobile App"
-                      className="rounded-2xl shadow-2xl"
-                    />
+                    <div className="relative group">
+                      <img 
+                        src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&q=80&w=400"
+                        alt="Analytics"
+                        className="rounded-2xl shadow-2xl transform group-hover:scale-105 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-navy/50 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                        <span className="text-white text-sm font-medium">Data Visualization</span>
+                      </div>
+                    </div>
+                    <div className="relative group">
+                      <img 
+                        src="https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&q=80&w=400"
+                        alt="Mobile App"
+                        className="rounded-2xl shadow-2xl transform group-hover:scale-105 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-navy/50 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                        <span className="text-white text-sm font-medium">Mobile Apps</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+        
+        {/* Scroll indicator */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce hidden md:block">
+          <div className="w-6 h-10 rounded-full border-2 border-navy/30 flex items-start justify-center p-2">
+            <div className="w-1.5 h-1.5 bg-navy rounded-full animate-scroll" />
+          </div>
+        </div>
+      </section>
+
+      {/* Tech Stack Banner */}
+      <section className="py-8 bg-slate-50 border-y border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-center gap-8 flex-wrap">
+            <span className="text-sm text-slate-500 font-medium">Powered by:</span>
+            {techLogos.map((tech) => (
+              <div key={tech.name} className="flex items-center gap-2 text-slate-600 hover:text-navy transition-colors">
+                <span className="text-xl">{tech.icon}</span>
+                <span className="text-sm font-medium">{tech.name}</span>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -159,18 +276,19 @@ const HomePage = () => {
               <Link 
                 key={service.title} 
                 to={service.link}
-                className="group relative overflow-hidden bg-white rounded-2xl border border-slate-100 p-8 hover:shadow-2xl transition-all duration-500 hover:-translate-y-1"
+                className="group relative overflow-hidden bg-white rounded-2xl border border-slate-100 p-8 hover:shadow-2xl transition-all duration-500 hover:-translate-y-2"
                 data-testid={`service-card-${index}`}
               >
                 <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-gold/10 to-transparent rounded-bl-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${service.color} rounded-t-2xl opacity-0 group-hover:opacity-100 transition-opacity`} />
                 <div className="relative">
-                  <div className="w-14 h-14 bg-navy/5 rounded-xl flex items-center justify-center mb-6 group-hover:bg-gold/10 transition-colors">
-                    <service.icon className="w-7 h-7 text-navy" />
+                  <div className={`w-14 h-14 bg-gradient-to-br ${service.color} rounded-xl flex items-center justify-center mb-6 shadow-lg`}>
+                    <service.icon className="w-7 h-7 text-white" />
                   </div>
                   <h3 className="font-heading text-xl font-semibold text-navy mb-3">{service.title}</h3>
                   <p className="text-slate-600 mb-4">{service.description}</p>
                   <span className="text-navy font-medium flex items-center gap-2 group-hover:text-gold transition-colors">
-                    Learn More <ArrowRight className="w-4 h-4" />
+                    Learn More <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </span>
                 </div>
               </Link>
@@ -352,38 +470,81 @@ const HomePage = () => {
               </h2>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {testimonials.map((testimonial, index) => (
+            {/* Testimonial Carousel */}
+            <div className="relative max-w-4xl mx-auto">
+              <div className="overflow-hidden">
                 <div 
-                  key={testimonial.id}
-                  className="bg-slate-50 rounded-2xl p-8 relative"
-                  data-testid={`testimonial-${index}`}
+                  className="flex transition-transform duration-500 ease-in-out"
+                  style={{ transform: `translateX(-${currentTestimonial * 100}%)` }}
                 >
-                  <div className="absolute top-6 right-8 text-6xl text-gold/20 font-serif">"</div>
-                  <div className="flex items-center gap-1 mb-4">
-                    {[...Array(testimonial.rating)].map((_, i) => (
-                      <Star key={i} className="w-5 h-5 text-gold fill-gold" />
+                  {testimonials.map((testimonial, index) => (
+                    <div 
+                      key={testimonial.id}
+                      className="w-full flex-shrink-0 px-4"
+                      data-testid={`testimonial-${index}`}
+                    >
+                      <div className="bg-gradient-to-br from-slate-50 to-white rounded-3xl p-8 md:p-12 relative shadow-lg border border-slate-100">
+                        <div className="absolute top-6 right-8 text-8xl text-gold/10 font-serif">"</div>
+                        <div className="flex items-center gap-1 mb-6">
+                          {[...Array(testimonial.rating)].map((_, i) => (
+                            <Star key={i} className="w-6 h-6 text-gold fill-gold" />
+                          ))}
+                        </div>
+                        <p className="text-xl md:text-2xl text-slate-700 leading-relaxed mb-8 font-medium italic">
+                          "{testimonial.content}"
+                        </p>
+                        <div className="flex items-center gap-4">
+                          <img 
+                            src={testimonial.avatar}
+                            alt={testimonial.client_name}
+                            className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-lg"
+                          />
+                          <div>
+                            <div className="font-heading font-semibold text-navy text-lg flex items-center gap-2">
+                              {testimonial.client_name}
+                              {testimonial.verified && (
+                                <CheckCircle className="w-5 h-5 text-green-500" />
+                              )}
+                            </div>
+                            <div className="text-slate-500">{testimonial.role}, {testimonial.company}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Navigation */}
+              {testimonials.length > 1 && (
+                <>
+                  <button 
+                    onClick={() => setCurrentTestimonial((prev) => (prev - 1 + testimonials.length) % testimonials.length)}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-4 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-slate-50 transition-colors"
+                  >
+                    <ChevronLeft className="w-6 h-6 text-navy" />
+                  </button>
+                  <button 
+                    onClick={() => setCurrentTestimonial((prev) => (prev + 1) % testimonials.length)}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-4 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-slate-50 transition-colors"
+                  >
+                    <ChevronRight className="w-6 h-6 text-navy" />
+                  </button>
+                  
+                  {/* Dots */}
+                  <div className="flex justify-center gap-2 mt-8">
+                    {testimonials.map((_, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setCurrentTestimonial(index)}
+                        className={`w-3 h-3 rounded-full transition-colors ${
+                          index === currentTestimonial ? 'bg-gold' : 'bg-slate-200'
+                        }`}
+                      />
                     ))}
                   </div>
-                  <p className="text-slate-700 leading-relaxed mb-6">{testimonial.content}</p>
-                  <div className="flex items-center gap-4">
-                    <img 
-                      src={testimonial.avatar}
-                      alt={testimonial.client_name}
-                      className="w-12 h-12 rounded-full object-cover"
-                    />
-                    <div>
-                      <div className="font-semibold text-navy flex items-center gap-2">
-                        {testimonial.client_name}
-                        {testimonial.verified && (
-                          <CheckCircle className="w-4 h-4 text-green-500" />
-                        )}
-                      </div>
-                      <div className="text-sm text-slate-500">{testimonial.role}, {testimonial.company}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                </>
+              )}
             </div>
           </div>
         </section>

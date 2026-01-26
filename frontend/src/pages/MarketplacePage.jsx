@@ -29,39 +29,53 @@ const MarketplacePage = () => {
   
   const [filters, setFilters] = useState({
     search: searchParams.get('search') || '',
-    category: category || '',
+    category: category || 'all',
     subcategory: '',
-    platform: '',
-    industry: '',
+    platform: 'all',
+    industry: 'all',
     priceRange: [0, 10000]
   });
 
   const { addToCart, isInCart } = useCart();
 
   const categories = [
-    { value: '', label: 'All Categories' },
+    { value: 'all', label: 'All Categories' },
     { value: 'template', label: 'Website Templates' },
-    { value: 'logo', label: 'Logo Packages' },
-    { value: 'app_template', label: 'App Templates' },
+    { value: 'software', label: 'Software' },
+    { value: 'logo', label: 'Logo & Branding' },
+    { value: 'app_template', label: 'Mobile App Templates' },
     { value: 'design_asset', label: 'Design Assets' },
   ];
 
   const platforms = [
-    { value: '', label: 'All Platforms' },
+    { value: 'all', label: 'All Platforms' },
     { value: 'React', label: 'React' },
     { value: 'Next.js', label: 'Next.js' },
+    { value: 'Vue.js', label: 'Vue.js' },
     { value: 'Flutter', label: 'Flutter' },
     { value: 'React Native', label: 'React Native' },
+    { value: 'Electron', label: 'Electron' },
+    { value: 'Python + React', label: 'Python + React' },
+    { value: 'React + Electron', label: 'React + Electron' },
+    { value: 'React + Node.js', label: 'React + Node.js' },
   ];
 
   const industries = [
-    { value: '', label: 'All Industries' },
+    { value: 'all', label: 'All Industries' },
     { value: 'Business', label: 'Business' },
     { value: 'Technology', label: 'Technology' },
     { value: 'Creative', label: 'Creative' },
     { value: 'Retail', label: 'Retail' },
     { value: 'Food & Beverage', label: 'Food & Beverage' },
     { value: 'Health & Fitness', label: 'Health & Fitness' },
+    { value: 'Finance', label: 'Finance' },
+    { value: 'Real Estate', label: 'Real Estate' },
+    { value: 'Education', label: 'Education' },
+    { value: 'Social', label: 'Social' },
+    { value: 'Travel', label: 'Travel' },
+    { value: 'Fashion', label: 'Fashion' },
+    { value: 'Environment', label: 'Environment' },
+    { value: 'General', label: 'General' },
   ];
 
   useEffect(() => {
@@ -78,10 +92,10 @@ const MarketplacePage = () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (filters.category) params.append('category', filters.category);
+      if (filters.category && filters.category !== 'all') params.append('category', filters.category);
       if (filters.subcategory) params.append('subcategory', filters.subcategory);
-      if (filters.platform) params.append('platform', filters.platform);
-      if (filters.industry) params.append('industry', filters.industry);
+      if (filters.platform && filters.platform !== 'all') params.append('platform', filters.platform);
+      if (filters.industry && filters.industry !== 'all') params.append('industry', filters.industry);
       if (filters.search) params.append('search', filters.search);
       if (filters.priceRange[0] > 0) params.append('min_price', filters.priceRange[0]);
       if (filters.priceRange[1] < 10000) params.append('max_price', filters.priceRange[1]);
@@ -109,16 +123,16 @@ const MarketplacePage = () => {
   const clearFilters = () => {
     setFilters({
       search: '',
-      category: '',
+      category: 'all',
       subcategory: '',
-      platform: '',
-      industry: '',
+      platform: 'all',
+      industry: 'all',
       priceRange: [0, 10000]
     });
   };
 
   const getCategoryTitle = () => {
-    if (!filters.category) return 'All Products';
+    if (!filters.category || filters.category === 'all') return 'All Products';
     const cat = categories.find(c => c.value === filters.category);
     return cat ? cat.label : 'Products';
   };
