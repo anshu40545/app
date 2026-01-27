@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import { 
   Code, Globe, Smartphone, Palette, Package, Award, ArrowRight, 
   CheckCircle, Send, Clock, Users, Zap
@@ -18,8 +17,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const ServicesPage = () => {
   const [formData, setFormData] = useState({
@@ -98,7 +96,7 @@ const ServicesPage = () => {
 
     setLoading(true);
     try {
-      await axios.post(`${API}/contact`, formData);
+      await apiClient.post('/contact', formData);
       toast.success('Inquiry submitted successfully! We will get back to you soon.');
       setFormData({
         name: '', email: '', phone: '', company: '',

@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
+import { apiClient, BACKEND_URL } from "@/lib/api";
 
 // Pages
 import HomePage from "@/pages/HomePage";
@@ -18,17 +18,18 @@ import OrderConfirmationPage from "@/pages/OrderConfirmationPage";
 // Context
 import { CartProvider } from "@/context/CartContext";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
-
 function App() {
   useEffect(() => {
+    // Log backend URL for debugging
+    console.log('[App] Backend URL:', BACKEND_URL);
+    
     // Seed data on first load
     const seedData = async () => {
       try {
-        await axios.post(`${API}/seed`);
+        await apiClient.post('/seed');
       } catch (e) {
         // Data already seeded or error
+        console.log('[App] Seed skipped or error:', e.message);
       }
     };
     seedData();

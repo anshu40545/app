@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
-import { ArrowRight, ExternalLink, Calendar, Code, X, ChevronLeft, ChevronRight, Award, Users, Clock, Target, Monitor, Smartphone, Palette, Settings } from 'lucide-react';
+import { ArrowRight, ExternalLink, Calendar, Code, X, ChevronLeft, ChevronRight, Award, Users, Clock, Target, Monitor, Smartphone, Palette, Settings, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -11,8 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const PortfolioPage = () => {
   const [portfolio, setPortfolio] = useState([]);
@@ -20,6 +18,11 @@ const PortfolioPage = () => {
   const [filter, setFilter] = useState('all');
   const [selectedProject, setSelectedProject] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  
+  // Refs for request cancellation and debouncing
+  const abortControllerRef = useRef(null);
+  const debounceTimerRef = useRef(null);
+  const lastFilterRef = useRef(filter);
 
   const categories = [
     { value: 'all', label: 'All Projects', icon: Target, color: 'bg-slate-600' },
@@ -36,20 +39,112 @@ const PortfolioPage = () => {
     { icon: Target, value: '3x', label: 'Avg. ROI Increase' },
   ];
 
-  useEffect(() => {
-    const fetchPortfolio = async () => {
-      try {
-        const params = filter !== 'all' ? `?category=${filter}` : '';
-        const response = await axios.get(`${API}/portfolio${params}`);
+  // Helper to check if error is from a cancelled request
+  const isCancelledError = (error) => {
+    return (
+      error.code === 'ERR_CANCELED' ||
+      error.name === 'CanceledError' ||
+      error.name === 'AbortError' ||
+      error.message === 'canceled' ||
+      error.code === 'ECONNABORTED'
+    );
+  };
+
+  // Memoized fetch function with abort controller
+  const fetchPortfolio = useCallback(async (filterValue) => {
+    // Cancel any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+    
+    setLoading(true);
+    
+    try {
+      const params = filterValue !== 'all' ? `?category=${filterValue}` : '';
+      const response = await apiClient.get(`/portfolio${params}`, {
+        signal: abortControllerRef.current.signal
+      });
+      
+      // Only update if this is still the current filter
+      if (lastFilterRef.current === filterValue) {
         setPortfolio(response.data);
-      } catch (error) {
-        console.error('Error fetching portfolio:', error);
-      } finally {
         setLoading(false);
       }
+    } catch (error) {
+      // Silently ignore cancelled/aborted requests - they're intentional
+      if (isCancelledError(error)) {
+        return;
+      }
+      console.error('Error fetching portfolio:', error);
+      // Only set loading false if this filter is still current
+      if (lastFilterRef.current === filterValue) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  // Handle filter change with debouncing
+  const handleFilterChange = useCallback((newFilter) => {
+    // Don't do anything if clicking the same filter
+    if (newFilter === lastFilterRef.current) {
+      return;
+    }
+    
+    // Cancel any pending request immediately
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Update the filter immediately for UI feedback
+    setFilter(newFilter);
+    lastFilterRef.current = newFilter;
+    
+    // Clear any existing debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    // Debounce the API call by 300ms to handle rapid clicks
+    debounceTimerRef.current = setTimeout(() => {
+      fetchPortfolio(newFilter);
+    }, 300);
+  }, [fetchPortfolio]);
+
+  // Initial fetch and cleanup
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Initial fetch only on mount
+    const params = lastFilterRef.current !== 'all' ? `?category=${lastFilterRef.current}` : '';
+    
+    abortControllerRef.current = new AbortController();
+    
+    apiClient.get(`/portfolio${params}`, {
+      signal: abortControllerRef.current.signal
+    })
+      .then(response => {
+        setPortfolio(response.data);
+        setLoading(false);
+      })
+      .catch(error => {
+        if (!isCancelledError(error)) {
+          console.error('Error fetching portfolio:', error);
+        }
+        setLoading(false);
+      });
+    
+    return () => {
+      // Cleanup on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
     };
-    fetchPortfolio();
-  }, [filter]);
+  }, []); // Only run on mount - filter changes handled by handleFilterChange
 
   const openProjectModal = (project) => {
     setSelectedProject(project);
@@ -118,18 +213,26 @@ const PortfolioPage = () => {
           <div className="flex flex-wrap gap-3" data-testid="portfolio-filters">
             {categories.map((cat) => {
               const IconComponent = cat.icon;
+              const isActive = filter === cat.value;
+              const isLoading = loading && isActive;
+              
               return (
                 <button
                   key={cat.value}
-                  onClick={() => setFilter(cat.value)}
+                  onClick={() => handleFilterChange(cat.value)}
+                  disabled={isLoading}
                   className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all ${
-                    filter === cat.value
+                    isActive
                       ? `${cat.color} text-white shadow-lg`
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
+                  } ${isLoading ? 'opacity-80 cursor-wait' : ''}`}
                   data-testid={`filter-${cat.value}`}
                 >
-                  <IconComponent className="w-4 h-4" />
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <IconComponent className="w-4 h-4" />
+                  )}
                   {cat.label}
                 </button>
               );

@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
 import { CheckCircle, Download, ArrowRight, Mail, Share2, Copy, Facebook, Twitter, Linkedin, FileDown, Package, Clock, Shield, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const OrderConfirmationPage = () => {
   const { orderId } = useParams();
@@ -19,7 +17,7 @@ const OrderConfirmationPage = () => {
   useEffect(() => {
     const fetchOrder = async () => {
       try {
-        const response = await axios.get(`${API}/orders/${orderId}`);
+        const response = await apiClient.get(`/orders/${orderId}`);
         setOrder(response.data);
       } catch (error) {
         console.error('Error fetching order:', error);

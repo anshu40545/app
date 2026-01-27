@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import { 
   ArrowRight, Code, Globe, Smartphone, Palette, Package, Award,
   CheckCircle, Star, Users, Briefcase, Shield, Clock, Play, ChevronLeft, ChevronRight,
@@ -9,8 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 // Animated counter component
 const AnimatedCounter = ({ end, duration = 2000, suffix = '' }) => {
@@ -64,10 +62,10 @@ const HomePage = () => {
     const fetchData = async () => {
       try {
         const [statsRes, testimonialsRes, portfolioRes, productsRes] = await Promise.all([
-          axios.get(`${API}/stats`),
-          axios.get(`${API}/testimonials`),
-          axios.get(`${API}/portfolio?featured=true`),
-          axios.get(`${API}/products`)
+          apiClient.get('/stats'),
+          apiClient.get('/testimonials'),
+          apiClient.get('/portfolio?featured=true'),
+          apiClient.get('/products')
         ]);
         setStats(statsRes.data);
         setTestimonials(testimonialsRes.data);

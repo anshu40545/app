@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
 import { Shield, Lock, CreditCard, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,8 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useCart } from '@/context/CartContext';
 import { toast } from 'sonner';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const CheckoutPage = () => {
   const navigate = useNavigate();
@@ -55,7 +53,7 @@ const CheckoutPage = () => {
 
     try {
       // Create order
-      const orderResponse = await axios.post(`${API}/orders/create`, {
+      const orderResponse = await apiClient.post('/orders/create', {
         items: cartItems.map(item => ({ product_id: item.id, quantity: 1 })),
         customer_email: formData.email,
         customer_name: formData.name
@@ -90,7 +88,7 @@ const CheckoutPage = () => {
         handler: async (response) => {
           try {
             // Verify payment
-            await axios.post(`${API}/orders/verify`, {
+            await apiClient.post('/orders/verify', {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature

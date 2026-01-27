@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
 import { 
   Star, ShoppingCart, CheckCircle, Download, Shield, 
   ArrowLeft, Share2, Heart, Eye, Copy, Facebook, Twitter, Linkedin,
@@ -12,8 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCart } from '@/context/CartContext';
 import { toast } from 'sonner';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const ProductDetailPage = () => {
   const { id } = useParams();
@@ -28,11 +26,11 @@ const ProductDetailPage = () => {
   useEffect(() => {
     const fetchProduct = async () => {
       try {
-        const response = await axios.get(`${API}/products/${id}`);
+        const response = await apiClient.get(`/products/${id}`);
         setProduct(response.data);
         
         // Fetch related products
-        const relatedResponse = await axios.get(`${API}/products?category=${response.data.category}&limit=4`);
+        const relatedResponse = await apiClient.get(`/products?category=${response.data.category}&limit=4`);
         setRelatedProducts(relatedResponse.data.filter(p => p.id !== id).slice(0, 3));
       } catch (error) {
         console.error('Error fetching product:', error);

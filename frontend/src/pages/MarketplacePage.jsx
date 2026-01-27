@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import axios from 'axios';
 import { Search, Filter, Star, ShoppingCart, Grid, List, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,8 +15,7 @@ import { Slider } from '@/components/ui/slider';
 import { useCart } from '@/context/CartContext';
 import { toast } from 'sonner';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const MarketplacePage = () => {
   const { category } = useParams();
@@ -85,29 +83,29 @@ const MarketplacePage = () => {
   }, [category]);
 
   useEffect(() => {
+    const fetchProducts = async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (filters.category && filters.category !== 'all') params.append('category', filters.category);
+        if (filters.subcategory) params.append('subcategory', filters.subcategory);
+        if (filters.platform && filters.platform !== 'all') params.append('platform', filters.platform);
+        if (filters.industry && filters.industry !== 'all') params.append('industry', filters.industry);
+        if (filters.search) params.append('search', filters.search);
+        if (filters.priceRange[0] > 0) params.append('min_price', filters.priceRange[0]);
+        if (filters.priceRange[1] < 10000) params.append('max_price', filters.priceRange[1]);
+
+        const response = await apiClient.get(`/products?${params.toString()}`);
+        setProducts(response.data);
+      } catch (error) {
+        console.error('Error fetching products:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchProducts();
   }, [filters]);
-
-  const fetchProducts = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (filters.category && filters.category !== 'all') params.append('category', filters.category);
-      if (filters.subcategory) params.append('subcategory', filters.subcategory);
-      if (filters.platform && filters.platform !== 'all') params.append('platform', filters.platform);
-      if (filters.industry && filters.industry !== 'all') params.append('industry', filters.industry);
-      if (filters.search) params.append('search', filters.search);
-      if (filters.priceRange[0] > 0) params.append('min_price', filters.priceRange[0]);
-      if (filters.priceRange[1] < 10000) params.append('max_price', filters.priceRange[1]);
-
-      const response = await axios.get(`${API}/products?${params.toString()}`);
-      setProducts(response.data);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleAddToCart = (product, e) => {
     e.preventDefault();

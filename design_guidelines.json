@@ -13,9 +13,17 @@
     },
     "typography": {
       "font_family": {
-        "heading": "Playfair Display, serif",
-        "body": "Inter, sans-serif",
+        "primary": "Satoshi, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        "heading": "Satoshi, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        "body": "Satoshi, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         "mono": "JetBrains Mono, monospace"
+      },
+      "weights": {
+        "light": 300,
+        "regular": 400,
+        "medium": 500,
+        "bold": 700,
+        "black": 900
       },
       "scale": {
         "h1": "text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-tight",
@@ -107,8 +115,9 @@
   "implementation_plan": {
     "phase_1_setup": [
       "Update tailwind.config.js with new colors and fonts",
-      "Install @fontsource/playfair-display and @fontsource/inter",
-      "Update index.css with CSS variables for theming"
+      "Add Satoshi font files to public/fonts directory",
+      "Add @font-face declarations for all Satoshi weights in index.css",
+      "Preload critical font files (Regular, Medium, Bold) in index.html"
     ],
     "phase_2_components": [
       "Create 'Section' wrapper component with standard padding",
@@ -124,7 +133,8 @@
     ]
   },
   "universal_guidelines": [
-    "Avoid 'Inter everywhere'. Use Playfair Display for all Headings (h1-h3).",
+    "Use Satoshi font family consistently across all text elements.",
+    "Use appropriate font weights: 300 (light), 400 (regular), 500 (medium), 700 (bold), 900 (black).",
     "Do not use generic full-screen gradients. Use white space and subtle mesh gradients.",
     "Ensure all interactive elements have hover states (color shift or lift).",
     "Use 'data-testid' on all interactive elements.",

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import { 
   Mail, Phone, MapPin, Clock, Send, MessageSquare,
   ArrowRight, CheckCircle, ChevronDown, Globe, Linkedin, Twitter, Instagram
@@ -24,8 +23,7 @@ import {
 } from '@/components/ui/accordion';
 import { toast } from 'sonner';
 import Layout from '@/components/layout/Layout';
-
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+import { apiClient } from '@/lib/api';
 
 const ContactPage = () => {
   const [formData, setFormData] = useState({
@@ -82,7 +80,7 @@ const ContactPage = () => {
 
     setLoading(true);
     try {
-      await axios.post(`${API}/contact`, formData);
+      await apiClient.post('/contact', formData);
       toast.success('Message sent successfully! We will get back to you soon.');
       setFormData({
         name: '', email: '', phone: '', company: '',

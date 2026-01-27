@@ -1313,10 +1313,20 @@ async def reseed_data():
 # Include the router in the main app
 app.include_router(api_router)
 
+# CORS configuration - handle dev tunnels and production URLs
+cors_origins_env = os.environ.get('CORS_ORIGINS', '')
+if cors_origins_env:
+    cors_origins = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
+else:
+    cors_origins = []
+
+# Allow all origins in development (for dev tunnels compatibility)
+# In production, set CORS_ORIGINS explicitly
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=cors_origins if cors_origins else ["*"],
+    allow_origin_regex=r"https://.*\.devtunnels\.ms|https://.*\.ngrok\.io|https://.*\.ngrok-free\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+",
     allow_methods=["*"],
     allow_headers=["*"],
 )
