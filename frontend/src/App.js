@@ -22,6 +22,7 @@ import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import VerifyEmailPage from "@/pages/VerifyEmailPage";
 import DashboardPage from "@/pages/DashboardPage";
+import GitHubCallbackPage from "@/pages/GitHubCallbackPage";
 
 // Context
 import { CartProvider } from "@/context/CartContext";
@@ -90,6 +91,7 @@ function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/verify-email" element={<VerifyEmailPage />} />
+            <Route path="/auth/github/callback" element={<GitHubCallbackPage />} />
             
             {/* Protected Routes */}
             <Route path="/dashboard" element={

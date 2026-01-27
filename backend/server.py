@@ -58,6 +58,11 @@ security = HTTPBearer(auto_error=False)
 # Frontend URL for email links
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
+# GitHub OAuth Configuration
+GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID', '')
+GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '')
+GITHUB_REDIRECT_URI = os.environ.get('GITHUB_REDIRECT_URI', f'{FRONTEND_URL}/auth/github/callback')
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
@@ -982,6 +987,230 @@ async def change_password(data: PasswordChange, current_user: dict = Depends(get
     )
     
     return {"message": "Password changed successfully"}
+
+# ===== GITHUB OAUTH ROUTES =====
+
+class GitHubCallbackRequest(BaseModel):
+    code: str
+    state: Optional[str] = None
+
+@api_router.get("/auth/github")
+async def github_auth():
+    """Initiate GitHub OAuth flow"""
+    if not GITHUB_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="GitHub OAuth is not configured"
+        )
+    
+    # Generate state for CSRF protection
+    state = secrets.token_urlsafe(32)
+    
+    # Store state temporarily (expires in 10 minutes)
+    await db.oauth_states.insert_one({
+        "state": state,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+    })
+    
+    github_auth_url = (
+        f"https://github.com/login/oauth/authorize"
+        f"?client_id={GITHUB_CLIENT_ID}"
+        f"&redirect_uri={GITHUB_REDIRECT_URI}"
+        f"&scope=user:email"
+        f"&state={state}"
+    )
+    
+    return {"auth_url": github_auth_url, "state": state}
+
+@api_router.post("/auth/github/callback", response_model=TokenResponse)
+async def github_callback(data: GitHubCallbackRequest):
+    """Handle GitHub OAuth callback"""
+    import httpx
+    
+    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="GitHub OAuth is not configured"
+        )
+    
+    # Verify state if provided
+    if data.state:
+        stored_state = await db.oauth_states.find_one({"state": data.state})
+        if not stored_state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid state parameter"
+            )
+        # Clean up used state
+        await db.oauth_states.delete_one({"state": data.state})
+        
+        # Check expiry
+        if stored_state.get("expires_at"):
+            expires = datetime.fromisoformat(stored_state["expires_at"].replace('Z', '+00:00'))
+            if datetime.now(timezone.utc) > expires:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="State has expired"
+                )
+    
+    # Exchange code for access token
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "client_secret": GITHUB_CLIENT_SECRET,
+                "code": data.code,
+                "redirect_uri": GITHUB_REDIRECT_URI
+            },
+            headers={"Accept": "application/json"}
+        )
+        
+        if token_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to exchange code for token"
+            )
+        
+        token_data = token_response.json()
+        
+        if "error" in token_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=token_data.get("error_description", "GitHub authentication failed")
+            )
+        
+        github_access_token = token_data.get("access_token")
+        
+        # Get user info from GitHub
+        user_response = await client.get(
+            "https://api.github.com/user",
+            headers={
+                "Authorization": f"Bearer {github_access_token}",
+                "Accept": "application/vnd.github.v3+json"
+            }
+        )
+        
+        if user_response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to get user info from GitHub"
+            )
+        
+        github_user = user_response.json()
+        
+        # Get primary email if not public
+        email = github_user.get("email")
+        if not email:
+            emails_response = await client.get(
+                "https://api.github.com/user/emails",
+                headers={
+                    "Authorization": f"Bearer {github_access_token}",
+                    "Accept": "application/vnd.github.v3+json"
+                }
+            )
+            if emails_response.status_code == 200:
+                emails = emails_response.json()
+                primary_email = next(
+                    (e for e in emails if e.get("primary") and e.get("verified")),
+                    None
+                )
+                if primary_email:
+                    email = primary_email["email"]
+        
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not retrieve email from GitHub. Please ensure your email is public or verified."
+            )
+    
+    # Check if user exists with this GitHub ID
+    existing_user = await db.users.find_one({"github_id": str(github_user["id"])})
+    
+    if existing_user:
+        # User exists with GitHub - log them in
+        await db.users.update_one(
+            {"id": existing_user["id"]},
+            {
+                "$set": {
+                    "last_login": datetime.now(timezone.utc).isoformat(),
+                    "avatar": github_user.get("avatar_url") or existing_user.get("avatar")
+                }
+            }
+        )
+        user = existing_user
+    else:
+        # Check if user exists with this email
+        existing_email_user = await db.users.find_one({"email": email.lower()})
+        
+        if existing_email_user:
+            # Link GitHub to existing account
+            await db.users.update_one(
+                {"id": existing_email_user["id"]},
+                {
+                    "$set": {
+                        "github_id": str(github_user["id"]),
+                        "github_username": github_user.get("login"),
+                        "avatar": github_user.get("avatar_url") or existing_email_user.get("avatar"),
+                        "email_verified": True,  # GitHub emails are verified
+                        "last_login": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+            )
+            user = existing_email_user
+            user["github_id"] = str(github_user["id"])
+        else:
+            # Create new user
+            user_id = str(uuid.uuid4())
+            new_user = {
+                "id": user_id,
+                "email": email.lower(),
+                "name": github_user.get("name") or github_user.get("login"),
+                "password_hash": None,  # No password for OAuth users
+                "avatar": github_user.get("avatar_url"),
+                "github_id": str(github_user["id"]),
+                "github_username": github_user.get("login"),
+                "email_verified": True,  # GitHub emails are verified
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "last_login": datetime.now(timezone.utc).isoformat()
+            }
+            await db.users.insert_one(new_user)
+            user = new_user
+            
+            # Send welcome email
+            try:
+                await send_welcome_email(email, new_user["name"])
+            except Exception as e:
+                logger.error(f"Failed to send welcome email: {e}")
+    
+    # Generate JWT token
+    access_token = create_access_token(
+        data={"sub": user["id"], "email": user["email"]},
+        expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        user=UserProfile(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            avatar=user.get("avatar"),
+            email_verified=user.get("email_verified", True),
+            created_at=user["created_at"],
+            last_login=datetime.now(timezone.utc).isoformat()
+        )
+    )
+
+@api_router.get("/auth/github/config")
+async def github_config():
+    """Get GitHub OAuth configuration for frontend"""
+    return {
+        "enabled": bool(GITHUB_CLIENT_ID),
+        "client_id": GITHUB_CLIENT_ID if GITHUB_CLIENT_ID else None
+    }
 
 # ===== USER DASHBOARD ROUTES =====
 

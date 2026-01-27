@@ -197,6 +197,56 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  // Initiate GitHub OAuth login
+  const initiateGithubLogin = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/auth/github');
+      const { auth_url } = response.data;
+      
+      // Redirect to GitHub
+      window.location.href = auth_url;
+      return { success: true };
+    } catch (error) {
+      const message = error.response?.data?.detail || 'GitHub login is not available.';
+      return { success: false, error: message };
+    }
+  }, []);
+
+  // Complete GitHub OAuth login (called from callback page)
+  const githubLogin = useCallback(async (code, state) => {
+    try {
+      const response = await apiClient.post('/auth/github/callback', {
+        code,
+        state
+      });
+      
+      const { access_token, user: userData } = response.data;
+      
+      // Store token and user
+      localStorage.setItem(TOKEN_KEY, access_token);
+      localStorage.setItem(USER_KEY, JSON.stringify(userData));
+      apiClient.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      
+      setUser(userData);
+      setIsAuthenticated(true);
+      
+      return { success: true, user: userData };
+    } catch (error) {
+      const message = error.response?.data?.detail || 'GitHub authentication failed.';
+      throw new Error(message);
+    }
+  }, []);
+
+  // Check if GitHub OAuth is enabled
+  const checkGithubEnabled = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/auth/github/config');
+      return response.data.enabled;
+    } catch (error) {
+      return false;
+    }
+  }, []);
+
   const value = {
     user,
     loading,
@@ -210,7 +260,10 @@ export const AuthProvider = ({ children }) => {
     resetPassword,
     verifyEmail,
     resendVerification,
-    refreshUser
+    refreshUser,
+    initiateGithubLogin,
+    githubLogin,
+    checkGithubEnabled
   };
 
   return (
