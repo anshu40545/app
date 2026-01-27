@@ -1,21 +1,32 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, ShoppingCart, ChevronDown } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Menu, X, ShoppingCart, ChevronDown, LogOut, Package, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCart } from '@/context/CartContext';
+import { useAuth } from '@/context/AuthContext';
+import { toast } from 'sonner';
 
 const Header = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { cartCount } = useCart();
+  const { user, isAuthenticated, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const isActive = (path) => location.pathname === path;
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+    toast.success('Logged out successfully');
+  };
 
   const navLinks = [
     { name: 'Home', path: '/' },
@@ -81,7 +92,7 @@ const Header = () => {
               <DropdownMenuContent align="center" className="w-48">
                 {marketplaceLinks.map((link) => (
                   <DropdownMenuItem key={link.path} asChild>
-                    <Link to={link.path} data-testid={`marketplace-${link.name.toLowerCase().replace(/\s/g, '-')}`}>
+                    <Link to={link.path} data-testid={`marketplace-${link.name.toLowerCase().replaceAll(' ', '-')}`}>
                       {link.name}
                     </Link>
                   </DropdownMenuItem>
@@ -101,17 +112,69 @@ const Header = () => {
               )}
             </Link>
 
-            <Link to="/services" className="hidden sm:block" data-testid="get-quote-btn">
-              <Button className="bg-navy hover:bg-navy-800 text-white rounded-full px-6">
-                Get a Quote
-              </Button>
-            </Link>
-
-            <Link to="/marketplace" className="hidden sm:block" data-testid="browse-templates-btn">
-              <Button variant="outline" className="border-gold text-navy hover:bg-gold/10 rounded-full px-6">
-                Browse Templates
-              </Button>
-            </Link>
+            {/* Auth Section */}
+            {isAuthenticated ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-slate-100 transition-colors">
+                    <div className="w-8 h-8 bg-navy rounded-full flex items-center justify-center">
+                      <span className="text-white text-sm font-semibold">
+                        {user?.name?.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <span className="hidden md:block text-sm font-medium text-slate-700 max-w-[100px] truncate">
+                      {user?.name?.split(' ')[0]}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-slate-500 hidden md:block" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="px-3 py-2 border-b border-slate-100">
+                    <p className="font-medium text-slate-900 truncate">{user?.name}</p>
+                    <p className="text-sm text-slate-500 truncate">{user?.email}</p>
+                  </div>
+                  <DropdownMenuItem asChild>
+                    <Link to="/dashboard" className="flex items-center gap-2 cursor-pointer">
+                      <Package className="w-4 h-4" />
+                      My Products
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/dashboard?tab=orders" className="flex items-center gap-2 cursor-pointer">
+                      <ShoppingCart className="w-4 h-4" />
+                      Order History
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/dashboard?tab=profile" className="flex items-center gap-2 cursor-pointer">
+                      <Settings className="w-4 h-4" />
+                      Profile Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    onClick={handleLogout}
+                    className="flex items-center gap-2 cursor-pointer text-red-600 focus:text-red-600"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sign Out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <div className="hidden sm:flex items-center gap-2">
+                <Link to="/login">
+                  <Button variant="ghost" className="rounded-full px-4">
+                    Log In
+                  </Button>
+                </Link>
+                <Link to="/register">
+                  <Button className="bg-navy hover:bg-navy/90 text-white rounded-full px-4">
+                    Sign Up
+                  </Button>
+                </Link>
+              </div>
+            )}
 
             {/* Mobile Menu Toggle */}
             <button
@@ -152,6 +215,54 @@ const Header = () => {
                     {link.name}
                   </Link>
                 ))}
+              </div>
+              
+              {/* Mobile Auth Section */}
+              <div className="border-t border-slate-200 my-2 pt-2">
+                {isAuthenticated ? (
+                  <>
+                    <div className="px-4 py-2 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-navy rounded-full flex items-center justify-center">
+                        <span className="text-white font-semibold">
+                          {user?.name?.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-slate-900">{user?.name}</p>
+                        <p className="text-sm text-slate-500">{user?.email}</p>
+                      </div>
+                    </div>
+                    <Link
+                      to="/dashboard"
+                      className="px-4 py-2 block rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      Dashboard
+                    </Link>
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        handleLogout();
+                      }}
+                      className="px-4 py-2 w-full text-left rounded-lg text-sm font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex flex-col gap-2 px-4">
+                    <Link to="/login" onClick={() => setMobileMenuOpen(false)}>
+                      <Button variant="outline" className="w-full rounded-lg">
+                        Log In
+                      </Button>
+                    </Link>
+                    <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
+                      <Button className="w-full bg-navy hover:bg-navy/90 rounded-lg">
+                        Sign Up
+                      </Button>
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
           </div>

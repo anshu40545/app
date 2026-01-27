@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,13 +9,16 @@ from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import razorpay
 import asyncio
 import resend
 import hmac
 import hashlib
 import dns.resolver
+import secrets
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -39,6 +43,20 @@ if razorpay_key_id and razorpay_key_secret:
 resend_api_key = os.environ.get('RESEND_API_KEY', '')
 if resend_api_key:
     resend.api_key = resend_api_key
+
+# JWT & Password Hashing Configuration
+SECRET_KEY = os.environ.get('JWT_SECRET_KEY', secrets.token_hex(32))
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+REFRESH_TOKEN_EXPIRE_DAYS = 30
+PASSWORD_RESET_EXPIRE_MINUTES = 30
+EMAIL_VERIFY_EXPIRE_HOURS = 24
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer(auto_error=False)
+
+# Frontend URL for email links
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -153,6 +171,251 @@ class PortfolioItem(BaseModel):
     client: Optional[str] = None
     year: int
     featured: bool = False
+
+# ===== AUTH MODELS =====
+
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    email: EmailStr
+    password_hash: str
+    name: str
+    avatar: Optional[str] = None
+    email_verified: bool = False
+    verification_token: Optional[str] = None
+    verification_token_expires: Optional[str] = None
+    reset_token: Optional[str] = None
+    reset_token_expires: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    last_login: Optional[str] = None
+    is_active: bool = True
+
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+    remember_me: bool = False
+
+class UserProfile(BaseModel):
+    id: str
+    email: str
+    name: str
+    avatar: Optional[str]
+    email_verified: bool
+    created_at: str
+    last_login: Optional[str]
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    avatar: Optional[str] = None
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+class PasswordReset(BaseModel):
+    email: EmailStr
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserProfile
+
+class UserOrder(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    razorpay_order_id: Optional[str] = None
+    razorpay_payment_id: Optional[str] = None
+    items: List[dict]
+    total_amount: float
+    currency: str = "INR"
+    status: str = "pending"  # pending, paid, failed, refunded
+    invoice_number: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class Download(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    product_id: str
+    order_id: str
+    downloaded_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    download_count: int = 1
+    last_downloaded: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# ===== AUTH HELPER FUNCTIONS =====
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def generate_verification_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    """Validate password meets security requirements"""
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    if not any(c.isupper() for c in password):
+        return False, "Password must contain at least one uppercase letter"
+    if not any(c.islower() for c in password):
+        return False, "Password must contain at least one lowercase letter"
+    if not any(c.isdigit() for c in password):
+        return False, "Password must contain at least one number"
+    if not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
+        return False, "Password must contain at least one special character"
+    return True, "Password is valid"
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Optional[dict]:
+    """Get current user from JWT token"""
+    if credentials is None:
+        return None
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+        return user
+    except JWTError:
+        return None
+
+async def get_required_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Get current user or raise 401"""
+    user = await get_current_user(credentials)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+async def send_verification_email(email: str, name: str, token: str):
+    """Send email verification link"""
+    if not resend_api_key:
+        logger.warning("Resend API key not configured, skipping verification email")
+        return
+    
+    verification_link = f"{FRONTEND_URL}/verify-email?token={token}"
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev'),
+            "to": [email],
+            "subject": "Verify your email - Devmora Web Solutions",
+            "html": f"""
+            <div style="font-family: 'Satoshi', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #1e3a5f;">Welcome to Devmora!</h1>
+                </div>
+                <p>Hi {name},</p>
+                <p>Thank you for registering with Devmora Web Solutions. Please verify your email address by clicking the button below:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{verification_link}" style="background-color: #1e3a5f; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: 600;">
+                        Verify Email Address
+                    </a>
+                </div>
+                <p>Or copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; color: #666;">{verification_link}</p>
+                <p>This link will expire in 24 hours.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #666; font-size: 12px;">If you didn't create an account with Devmora, please ignore this email.</p>
+            </div>
+            """
+        })
+    except Exception as e:
+        logger.error(f"Failed to send verification email: {e}")
+
+async def send_password_reset_email(email: str, name: str, token: str):
+    """Send password reset link"""
+    if not resend_api_key:
+        logger.warning("Resend API key not configured, skipping password reset email")
+        return
+    
+    reset_link = f"{FRONTEND_URL}/reset-password?token={token}"
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev'),
+            "to": [email],
+            "subject": "Reset your password - Devmora Web Solutions",
+            "html": f"""
+            <div style="font-family: 'Satoshi', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #1e3a5f;">Password Reset</h1>
+                </div>
+                <p>Hi {name},</p>
+                <p>We received a request to reset your password. Click the button below to create a new password:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{reset_link}" style="background-color: #1e3a5f; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: 600;">
+                        Reset Password
+                    </a>
+                </div>
+                <p>Or copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; color: #666;">{reset_link}</p>
+                <p>This link will expire in 30 minutes.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #666; font-size: 12px;">If you didn't request a password reset, please ignore this email or contact support if you have concerns.</p>
+            </div>
+            """
+        })
+    except Exception as e:
+        logger.error(f"Failed to send password reset email: {e}")
+
+async def send_welcome_email(email: str, name: str):
+    """Send welcome email after verification"""
+    if not resend_api_key:
+        return
+    
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev'),
+            "to": [email],
+            "subject": "Welcome to Devmora Web Solutions!",
+            "html": f"""
+            <div style="font-family: 'Satoshi', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #1e3a5f;">Welcome Aboard! 🎉</h1>
+                </div>
+                <p>Hi {name},</p>
+                <p>Your email has been verified and your Devmora account is now fully activated!</p>
+                <p>Here's what you can do now:</p>
+                <ul>
+                    <li>Browse our marketplace for premium templates and digital assets</li>
+                    <li>Access your purchased products anytime from your dashboard</li>
+                    <li>Download unlimited times for products you've purchased</li>
+                    <li>Track your order history and invoices</li>
+                </ul>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{FRONTEND_URL}/marketplace" style="background-color: #1e3a5f; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: 600;">
+                        Explore Marketplace
+                    </a>
+                </div>
+                <p>Thank you for choosing Devmora Web Solutions!</p>
+            </div>
+            """
+        })
+    except Exception as e:
+        logger.error(f"Failed to send welcome email: {e}")
 
 # ===== ROUTES =====
 
@@ -408,6 +671,641 @@ async def get_stats():
         "happy_clients": 8,
         "products_sold": 25
     }
+
+# ===== AUTHENTICATION ROUTES =====
+
+@api_router.post("/auth/register", response_model=TokenResponse)
+async def register(user_data: UserRegister):
+    """Register a new user"""
+    # Check if user already exists
+    existing_user = await db.users.find_one({"email": user_data.email.lower()})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An account with this email already exists"
+        )
+    
+    # Validate password strength
+    is_valid, message = validate_password_strength(user_data.password)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+    
+    # Generate verification token
+    verification_token = generate_verification_token()
+    verification_expires = (datetime.now(timezone.utc) + timedelta(hours=EMAIL_VERIFY_EXPIRE_HOURS)).isoformat()
+    
+    # Create user
+    user = User(
+        email=user_data.email.lower(),
+        password_hash=get_password_hash(user_data.password),
+        name=user_data.name,
+        verification_token=verification_token,
+        verification_token_expires=verification_expires
+    )
+    
+    await db.users.insert_one(user.model_dump())
+    
+    # Send verification email
+    await send_verification_email(user.email, user.name, verification_token)
+    
+    # Create access token
+    access_token = create_access_token(
+        data={"sub": user.id, "email": user.email}
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        user=UserProfile(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            avatar=user.avatar,
+            email_verified=user.email_verified,
+            created_at=user.created_at,
+            last_login=user.last_login
+        )
+    )
+
+@api_router.post("/auth/login", response_model=TokenResponse)
+async def login(user_data: UserLogin):
+    """Login user"""
+    user = await db.users.find_one({"email": user_data.email.lower()})
+    
+    if not user or not verify_password(user_data.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+    
+    if not user.get("is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated"
+        )
+    
+    # Update last login
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Set token expiry based on remember me
+    if user_data.remember_me:
+        expires_delta = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    else:
+        expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    access_token = create_access_token(
+        data={"sub": user["id"], "email": user["email"]},
+        expires_delta=expires_delta
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        user=UserProfile(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            avatar=user.get("avatar"),
+            email_verified=user.get("email_verified", False),
+            created_at=user["created_at"],
+            last_login=datetime.now(timezone.utc).isoformat()
+        )
+    )
+
+@api_router.post("/auth/verify-email")
+async def verify_email(token: str):
+    """Verify user email"""
+    user = await db.users.find_one({"verification_token": token})
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token"
+        )
+    
+    # Check if token is expired
+    if user.get("verification_token_expires"):
+        expires = datetime.fromisoformat(user["verification_token_expires"].replace('Z', '+00:00'))
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification token has expired. Please request a new one."
+            )
+    
+    # Update user as verified
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {
+                "email_verified": True,
+                "verification_token": None,
+                "verification_token_expires": None,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+    
+    # Send welcome email
+    await send_welcome_email(user["email"], user["name"])
+    
+    return {"message": "Email verified successfully"}
+
+@api_router.post("/auth/resend-verification")
+async def resend_verification(current_user: dict = Depends(get_required_user)):
+    """Resend verification email"""
+    if current_user.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+    
+    # Generate new verification token
+    verification_token = generate_verification_token()
+    verification_expires = (datetime.now(timezone.utc) + timedelta(hours=EMAIL_VERIFY_EXPIRE_HOURS)).isoformat()
+    
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {
+            "$set": {
+                "verification_token": verification_token,
+                "verification_token_expires": verification_expires
+            }
+        }
+    )
+    
+    await send_verification_email(current_user["email"], current_user["name"], verification_token)
+    
+    return {"message": "Verification email sent"}
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(data: PasswordReset):
+    """Request password reset"""
+    user = await db.users.find_one({"email": data.email.lower()})
+    
+    # Always return success to prevent email enumeration
+    if not user:
+        return {"message": "If an account with that email exists, we've sent a password reset link"}
+    
+    # Generate reset token
+    reset_token = generate_verification_token()
+    reset_expires = (datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES)).isoformat()
+    
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {
+                "reset_token": reset_token,
+                "reset_token_expires": reset_expires
+            }
+        }
+    )
+    
+    await send_password_reset_email(user["email"], user["name"], reset_token)
+    
+    return {"message": "If an account with that email exists, we've sent a password reset link"}
+
+@api_router.post("/auth/reset-password")
+async def reset_password(data: PasswordResetConfirm):
+    """Reset password with token"""
+    user = await db.users.find_one({"reset_token": data.token})
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    # Check if token is expired
+    if user.get("reset_token_expires"):
+        expires = datetime.fromisoformat(user["reset_token_expires"].replace('Z', '+00:00'))
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reset token has expired. Please request a new one."
+            )
+    
+    # Validate new password
+    is_valid, message = validate_password_strength(data.new_password)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+    
+    # Update password
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {
+                "password_hash": get_password_hash(data.new_password),
+                "reset_token": None,
+                "reset_token_expires": None,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+    
+    return {"message": "Password reset successfully"}
+
+@api_router.get("/auth/me", response_model=UserProfile)
+async def get_me(current_user: dict = Depends(get_required_user)):
+    """Get current user profile"""
+    return UserProfile(
+        id=current_user["id"],
+        email=current_user["email"],
+        name=current_user["name"],
+        avatar=current_user.get("avatar"),
+        email_verified=current_user.get("email_verified", False),
+        created_at=current_user["created_at"],
+        last_login=current_user.get("last_login")
+    )
+
+@api_router.put("/auth/profile", response_model=UserProfile)
+async def update_profile(data: UserUpdate, current_user: dict = Depends(get_required_user)):
+    """Update user profile"""
+    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    
+    if data.name is not None:
+        update_data["name"] = data.name
+    if data.avatar is not None:
+        update_data["avatar"] = data.avatar
+    
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {"$set": update_data}
+    )
+    
+    updated_user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0, "password_hash": 0})
+    
+    return UserProfile(
+        id=updated_user["id"],
+        email=updated_user["email"],
+        name=updated_user["name"],
+        avatar=updated_user.get("avatar"),
+        email_verified=updated_user.get("email_verified", False),
+        created_at=updated_user["created_at"],
+        last_login=updated_user.get("last_login")
+    )
+
+@api_router.post("/auth/change-password")
+async def change_password(data: PasswordChange, current_user: dict = Depends(get_required_user)):
+    """Change user password"""
+    # Verify current password
+    user = await db.users.find_one({"id": current_user["id"]})
+    if not verify_password(data.current_password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+    
+    # Validate new password
+    is_valid, message = validate_password_strength(data.new_password)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+    
+    # Update password
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {
+            "$set": {
+                "password_hash": get_password_hash(data.new_password),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+    
+    return {"message": "Password changed successfully"}
+
+# ===== USER DASHBOARD ROUTES =====
+
+@api_router.get("/user/purchases")
+async def get_user_purchases(current_user: dict = Depends(get_required_user)):
+    """Get all purchases for current user"""
+    orders = await db.user_orders.find(
+        {"user_id": current_user["id"], "status": "paid"},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    # Get product details for each purchase
+    purchases = []
+    for order in orders:
+        for item in order.get("items", []):
+            product = await db.products.find_one({"id": item.get("product_id")}, {"_id": 0})
+            if product:
+                # Get download info
+                download = await db.downloads.find_one({
+                    "user_id": current_user["id"],
+                    "product_id": item.get("product_id"),
+                    "order_id": order["id"]
+                }, {"_id": 0})
+                
+                purchases.append({
+                    "order_id": order["id"],
+                    "product": product,
+                    "purchase_date": order["created_at"],
+                    "price_paid": item.get("price", product.get("price")),
+                    "license_type": item.get("license_type", product.get("license_type", "Standard")),
+                    "download_count": download.get("download_count", 0) if download else 0,
+                    "last_downloaded": download.get("last_downloaded") if download else None
+                })
+    
+    return purchases
+
+@api_router.get("/user/orders")
+async def get_user_orders(current_user: dict = Depends(get_required_user)):
+    """Get all orders for current user"""
+    orders = await db.user_orders.find(
+        {"user_id": current_user["id"]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return orders
+
+@api_router.get("/user/orders/{order_id}")
+async def get_user_order(order_id: str, current_user: dict = Depends(get_required_user)):
+    """Get specific order details"""
+    order = await db.user_orders.find_one(
+        {"id": order_id, "user_id": current_user["id"]},
+        {"_id": 0}
+    )
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    return order
+
+@api_router.get("/user/downloads")
+async def get_user_downloads(current_user: dict = Depends(get_required_user)):
+    """Get download history for current user"""
+    downloads = await db.downloads.find(
+        {"user_id": current_user["id"]},
+        {"_id": 0}
+    ).sort("last_downloaded", -1).to_list(100)
+    
+    # Enrich with product details
+    enriched_downloads = []
+    for download in downloads:
+        product = await db.products.find_one({"id": download["product_id"]}, {"_id": 0})
+        if product:
+            enriched_downloads.append({
+                **download,
+                "product": product
+            })
+    
+    return enriched_downloads
+
+@api_router.post("/user/download/{product_id}")
+async def download_product(product_id: str, current_user: dict = Depends(get_required_user)):
+    """Generate download link for a purchased product"""
+    # Check if user has purchased this product
+    purchase = await db.user_orders.find_one({
+        "user_id": current_user["id"],
+        "status": "paid",
+        "items.product_id": product_id
+    })
+    
+    if not purchase:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You haven't purchased this product"
+        )
+    
+    # Get product details
+    product = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Update or create download record
+    existing_download = await db.downloads.find_one({
+        "user_id": current_user["id"],
+        "product_id": product_id,
+        "order_id": purchase["id"]
+    })
+    
+    if existing_download:
+        await db.downloads.update_one(
+            {"id": existing_download["id"]},
+            {
+                "$inc": {"download_count": 1},
+                "$set": {"last_downloaded": datetime.now(timezone.utc).isoformat()}
+            }
+        )
+    else:
+        download = Download(
+            user_id=current_user["id"],
+            product_id=product_id,
+            order_id=purchase["id"]
+        )
+        await db.downloads.insert_one(download.model_dump())
+    
+    # Increment product downloads
+    await db.products.update_one(
+        {"id": product_id},
+        {"$inc": {"downloads": 1}}
+    )
+    
+    # Generate time-limited download token (valid for 1 hour)
+    download_token = create_access_token(
+        data={"product_id": product_id, "user_id": current_user["id"]},
+        expires_delta=timedelta(hours=1)
+    )
+    
+    return {
+        "message": "Download authorized",
+        "download_token": download_token,
+        "product_name": product["name"],
+        "expires_in": 3600  # 1 hour in seconds
+    }
+
+@api_router.get("/user/stats")
+async def get_user_stats(current_user: dict = Depends(get_required_user)):
+    """Get user dashboard statistics"""
+    # Count total purchases
+    total_purchases = await db.user_orders.count_documents({
+        "user_id": current_user["id"],
+        "status": "paid"
+    })
+    
+    # Count total downloads
+    downloads = await db.downloads.find(
+        {"user_id": current_user["id"]}
+    ).to_list(1000)
+    total_downloads = sum(d.get("download_count", 0) for d in downloads)
+    
+    # Calculate total spent
+    orders = await db.user_orders.find(
+        {"user_id": current_user["id"], "status": "paid"},
+        {"total_amount": 1}
+    ).to_list(1000)
+    total_spent = sum(o.get("total_amount", 0) for o in orders)
+    
+    return {
+        "total_purchases": total_purchases,
+        "total_downloads": total_downloads,
+        "total_spent": total_spent,
+        "member_since": current_user["created_at"]
+    }
+
+# ===== MODIFIED ORDER ROUTES FOR AUTHENTICATED USERS =====
+
+@api_router.post("/orders/create-authenticated")
+async def create_authenticated_order(order_data: OrderCreate, current_user: dict = Depends(get_required_user)):
+    """Create order for authenticated user"""
+    # Fetch products and calculate total
+    items_with_details = []
+    total = 0.0
+    
+    for item in order_data.items:
+        product = await db.products.find_one({"id": item.product_id}, {"_id": 0})
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
+        item_total = product["price"] * item.quantity
+        total += item_total
+        items_with_details.append({
+            "product_id": item.product_id,
+            "name": product["name"],
+            "price": product["price"],
+            "quantity": item.quantity,
+            "item_total": item_total,
+            "license_type": product.get("license_type", "Standard"),
+            "image": product.get("image")
+        })
+    
+    # Create Razorpay order
+    razorpay_order = None
+    if razorpay_client:
+        try:
+            razorpay_order = razorpay_client.order.create({
+                "amount": int(total * 100),  # Convert to paise
+                "currency": "INR",
+                "payment_capture": 1
+            })
+        except Exception as e:
+            logger.error(f"Razorpay order creation failed: {e}")
+            raise HTTPException(status_code=500, detail="Payment gateway error")
+    
+    # Generate invoice number
+    invoice_count = await db.user_orders.count_documents({})
+    invoice_number = f"INV-{datetime.now().strftime('%Y%m')}-{str(invoice_count + 1).zfill(5)}"
+    
+    # Create order in database
+    user_order = UserOrder(
+        user_id=current_user["id"],
+        items=items_with_details,
+        total_amount=total,
+        razorpay_order_id=razorpay_order["id"] if razorpay_order else None,
+        invoice_number=invoice_number
+    )
+    
+    await db.user_orders.insert_one(user_order.model_dump())
+    
+    # Also create in regular orders collection for backward compatibility
+    order = Order(
+        id=user_order.id,
+        items=items_with_details,
+        total_amount=total,
+        customer_email=current_user["email"],
+        customer_name=current_user["name"],
+        razorpay_order_id=razorpay_order["id"] if razorpay_order else None
+    )
+    await db.orders.insert_one(order.model_dump())
+    
+    return {
+        "order_id": user_order.id,
+        "razorpay_order_id": razorpay_order["id"] if razorpay_order else None,
+        "amount": int(total * 100),
+        "currency": "INR",
+        "key_id": razorpay_key_id,
+        "invoice_number": invoice_number
+    }
+
+@api_router.post("/orders/verify-authenticated")
+async def verify_authenticated_payment(request: Request, current_user: dict = Depends(get_required_user)):
+    """Verify payment for authenticated user"""
+    data = await request.json()
+    razorpay_order_id = data.get("razorpay_order_id")
+    razorpay_payment_id = data.get("razorpay_payment_id")
+    razorpay_signature = data.get("razorpay_signature")
+    
+    if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
+        raise HTTPException(status_code=400, detail="Missing payment details")
+    
+    # Verify signature
+    try:
+        msg = f"{razorpay_order_id}|{razorpay_payment_id}"
+        generated_signature = hmac.new(
+            razorpay_key_secret.encode(),
+            msg.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        if generated_signature != razorpay_signature:
+            raise HTTPException(status_code=400, detail="Invalid signature")
+    except Exception as e:
+        logger.error(f"Signature verification failed: {e}")
+        raise HTTPException(status_code=400, detail="Payment verification failed")
+    
+    # Update user order status
+    result = await db.user_orders.update_one(
+        {"razorpay_order_id": razorpay_order_id, "user_id": current_user["id"]},
+        {"$set": {"status": "paid", "razorpay_payment_id": razorpay_payment_id}}
+    )
+    
+    # Also update regular orders collection
+    await db.orders.update_one(
+        {"razorpay_order_id": razorpay_order_id},
+        {"$set": {"status": "paid", "razorpay_payment_id": razorpay_payment_id}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Fetch order details
+    order = await db.user_orders.find_one({"razorpay_order_id": razorpay_order_id}, {"_id": 0})
+    
+    # Send confirmation email
+    if resend_api_key and order:
+        try:
+            items_html = "".join([
+                f"<li>{item['name']} - ₹{item['item_total']}</li>"
+                for item in order["items"]
+            ])
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev'),
+                "to": [current_user["email"]],
+                "subject": f"Order Confirmation #{order.get('invoice_number', order['id'])} - Devmora Web Solutions",
+                "html": f"""
+                <div style="font-family: 'Satoshi', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #1e3a5f;">Order Confirmed! 🎉</h1>
+                    </div>
+                    <p>Hi {current_user['name']},</p>
+                    <p>Thank you for your purchase! Your order has been confirmed.</p>
+                    <h3>Order Details:</h3>
+                    <p><strong>Order #:</strong> {order.get('invoice_number', order['id'])}</p>
+                    <ul>{items_html}</ul>
+                    <p><strong>Total: ₹{order['total_amount']}</strong></p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{FRONTEND_URL}/dashboard" style="background-color: #1e3a5f; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: 600;">
+                            Download Your Products
+                        </a>
+                    </div>
+                    <p>You can download your purchased products anytime from your dashboard.</p>
+                    <p>Thank you for choosing Devmora Web Solutions!</p>
+                </div>
+                """
+            })
+        except Exception as e:
+            logger.error(f"Email sending failed: {e}")
+    
+    return {"status": "success", "order_id": order["id"] if order else None}
 
 # Seed data endpoint (for initial setup)
 @api_router.post("/seed")
